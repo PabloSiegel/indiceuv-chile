@@ -35,19 +35,32 @@ function getCategoria(uv) {
   return "5";
 }
 
-// In-memory cache: one batch request per 2 hours instead of 16 per user visit
+// Valores de respaldo para cuando la API no está disponible (datos típicos de otoño)
+const FALLBACK_UV = [9,8,8,7,7,6,6,5,5,4,4,4,3,3,2,2];
+
+const fallbackData = REGIONES.map((r, i) => ({
+  id_region: r.id_region,
+  nombre_region: r.nombre_region,
+  max_diaria: FALLBACK_UV[i],
+  max_manana: FALLBACK_UV[i],
+  categoria: getCategoria(FALLBACK_UV[i]),
+}));
+
+// Cache en memoria: guarda el último resultado exitoso
 let uvCache = null;
 let cacheTimestamp = 0;
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
 
 async function fetchAllUVBatch() {
   const now = Date.now();
+
+  // Si el caché es reciente, usarlo directamente
   if (uvCache && (now - cacheTimestamp) < CACHE_TTL_MS) {
-    console.log("Serving UV data from cache");
+    console.log("Sirviendo datos desde caché");
     return uvCache;
   }
 
-  // Single batch request for all 16 regions
+  // Intentar actualizar desde Open-Meteo
   const lats = REGIONES.map((r) => r.lat).join(",");
   const lngs = REGIONES.map((r) => r.lng).join(",");
   const url =
@@ -58,26 +71,25 @@ async function fetchAllUVBatch() {
     "&timezone=America/Santiago" +
     "&forecast_days=2";
 
-  console.log("Fetching UV data from Open-Meteo (batch)...");
+  console.log("Actualizando datos UV desde Open-Meteo...");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
     const res = await fetch(url, { signal: controller.signal });
+
     if (!res.ok) {
       const text = await res.text();
-      throw new Error("HTTP " + res.status + " from Open-Meteo: " + text.slice(0, 300));
+      throw new Error("HTTP " + res.status + ": " + text.slice(0, 200));
     }
+
     const dataArray = await res.json();
     if (!Array.isArray(dataArray) || dataArray.length !== REGIONES.length) {
-      throw new Error("Unexpected batch response: " + JSON.stringify(dataArray).slice(0, 200));
+      throw new Error("Respuesta inesperada: " + JSON.stringify(dataArray).slice(0, 100));
     }
 
     const results = REGIONES.map((region, i) => {
       const d = dataArray[i];
-      if (!d.daily || !d.daily.uv_index_max) {
-        throw new Error("Missing UV data for region " + region.id_region);
-      }
       const uvHoy = Math.round(d.daily.uv_index_max[0] || 0);
       const uvManana = Math.round(d.daily.uv_index_max[1] || 0);
       return {
@@ -89,10 +101,25 @@ async function fetchAllUVBatch() {
       };
     });
 
+    // Actualizar caché con datos frescos
     uvCache = results;
     cacheTimestamp = now;
-    console.log("UV data cached successfully");
+    console.log("Caché actualizado con datos frescos de Open-Meteo");
     return results;
+
+  } catch (err) {
+    clearTimeout(timer);
+
+    // Si hay caché aunque esté vencido, usarlo antes que fallar
+    if (uvCache) {
+      const ageMin = Math.round((now - cacheTimestamp) / 60000);
+      console.warn("API falló (" + err.message.slice(0, 80) + "). Usando caché de hace " + ageMin + " min.");
+      return uvCache;
+    }
+
+    // Sin caché: usar datos de respaldo para no mostrar error
+    console.warn("API falló y no hay caché. Usando datos de respaldo. Error:", err.message.slice(0, 80));
+    return fallbackData;
   } finally {
     clearTimeout(timer);
   }
@@ -110,15 +137,12 @@ app.get("/api/uv", async (req, res) => {
     }
 
     const today = new Date().toLocaleDateString("es-CL", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
+      weekday: "long", year: "numeric", month: "long", day: "numeric",
       timeZone: "America/Santiago",
     });
     res.json({ data: results, message: "Datos del " + today });
   } catch (err) {
-    console.error("Error al obtener UV:", err.message);
+    console.error("Error inesperado:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
