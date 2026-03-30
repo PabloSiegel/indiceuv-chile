@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: indiceuv-chile
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: UV_API_KEY
+        value: zx3sbkxp63rl
