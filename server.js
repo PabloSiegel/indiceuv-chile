@@ -2,71 +2,98 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
-const http = require("http");
 const https = require("https");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const API_KEY = process.env.UV_API_KEY || "zx3sbkxp63rl";
-const API_BASE = "http://indiceuv.cl/ws/wsIndiceUVREST.php";
 
 if (process.env.NODE_ENV !== "production") { app.use(cors()); }
 
-function httpGet(urlStr, redirects) {
-  redirects = redirects || 0;
+// 16 regiones de Chile con coordenadas de su capital regional
+const REGIONES = [
+  { id_region: "1",  nombre_region: "Arica y Parinacota",  lat: -18.4783, lng: -70.3126 },
+  { id_region: "2",  nombre_region: "Tarapaca",             lat: -20.2141, lng: -70.1522 },
+  { id_region: "3",  nombre_region: "Antofagasta",          lat: -23.6509, lng: -70.3975 },
+  { id_region: "4",  nombre_region: "Atacama",              lat: -27.3668, lng: -70.3322 },
+  { id_region: "5",  nombre_region: "Coquimbo",             lat: -29.9027, lng: -71.2520 },
+  { id_region: "6",  nombre_region: "Valparaiso",           lat: -33.0472, lng: -71.6127 },
+  { id_region: "7",  nombre_region: "Metropolitana",        lat: -33.4569, lng: -70.6483 },
+  { id_region: "8",  nombre_region: "O'Higgins",            lat: -34.1708, lng: -70.7397 },
+  { id_region: "9",  nombre_region: "Maule",                lat: -35.4264, lng: -71.6554 },
+  { id_region: "10", nombre_region: "Nuble",                lat: -36.6063, lng: -72.1034 },
+  { id_region: "11", nombre_region: "Biobio",               lat: -36.8201, lng: -73.0444 },
+  { id_region: "12", nombre_region: "La Araucania",         lat: -38.7359, lng: -72.5904 },
+  { id_region: "13", nombre_region: "Los Rios",             lat: -39.8142, lng: -73.2459 },
+  { id_region: "14", nombre_region: "Los Lagos",            lat: -41.4693, lng: -72.9424 },
+  { id_region: "15", nombre_region: "Aysen",                lat: -45.5752, lng: -72.0662 },
+  { id_region: "16", nombre_region: "Magallanes",           lat: -53.1638, lng: -70.9171 },
+];
+
+function getCategoria(uv) {
+  if (uv <= 2) return "1";
+  if (uv <= 5) return "2";
+  if (uv <= 7) return "3";
+  if (uv <= 10) return "4";
+  return "5";
+}
+
+function httpsGet(urlStr) {
   return new Promise(function(resolve, reject) {
-    if (redirects > 5) return reject(new Error("Too many redirects"));
-    var parsedUrl = new URL(urlStr);
-    var lib = parsedUrl.protocol === "https:" ? https : http;
-    var options = {
-      hostname: parsedUrl.hostname,
-      path: parsedUrl.pathname + parsedUrl.search,
-      method: "GET",
-      timeout: 10000,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; IndiceuVProxy/1.0)",
-        "Accept": "application/json, text/plain, */*"
-      }
-    };
-    var req = lib.request(options, function(res) {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        var nextUrl = new URL(res.headers.location, urlStr).toString();
-        res.resume();
-        return resolve(httpGet(nextUrl, redirects + 1));
-      }
+    var req = https.get(urlStr, { timeout: 15000 }, function(res) {
       var data = "";
       res.setEncoding("utf8");
       res.on("data", function(chunk) { data += chunk; });
-      res.on("end", function() { resolve({ status: res.statusCode, body: data }); });
+      res.on("end", function() {
+        try { resolve(JSON.parse(data)); }
+        catch(e) { reject(new Error("Invalid JSON from " + urlStr)); }
+      });
     });
     req.on("timeout", function() { req.destroy(); reject(new Error("ETIMEDOUT")); });
     req.on("error", reject);
-    req.end();
   });
 }
 
+async function getUVForRegion(region) {
+  var url = "https://api.open-meteo.com/v1/forecast?latitude=" + region.lat +
+    "&longitude=" + region.lng +
+    "&daily=uv_index_max&timezone=America%2FSantiago&forecast_days=2";
+  var data = await httpsGet(url);
+  var uvHoy = Math.round(data.daily.uv_index_max[0] || 0);
+  var uvManana = Math.round(data.daily.uv_index_max[1] || 0);
+  return {
+    id_region: region.id_region,
+    nombre_region: region.nombre_region,
+    max_diaria: uvHoy,
+    max_manana: uvManana,
+    categoria: getCategoria(uvHoy),
+  };
+}
+
 app.get("/api/uv", async (req, res) => {
-  const region = req.query.region ?? "0";
-  const url = `${API_BASE}?id_region=${region}&llave=${API_KEY}`;
   try {
-    const { status, body } = await httpGet(url);
-    if (status !== 200) return res.status(status).json({ error: `Error upstream: ${status}` });
-    const data = JSON.parse(body);
-    res.json(data);
+    var region = req.query.region || "0";
+    var regiones = region === "0" ? REGIONES : REGIONES.filter(function(r) { return r.id_region === region; });
+    if (regiones.length === 0) return res.status(404).json({ error: "Region not found" });
+    var results = await Promise.all(regiones.map(getUVForRegion));
+    var today = new Date().toLocaleDateString("es-CL", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric",
+      timeZone: "America/Santiago"
+    });
+    res.json({ data: results, message: "Datos del " + today });
   } catch (err) {
-    console.error("Error al consultar indiceuv.cl:", err.message, "code:", err.code);
-    res.status(500).json({ error: "No se pudo conectar con indiceuv.cl", code: err.code || err.message });
+    console.error("Error al obtener UV:", err.message, err.code);
+    res.status(500).json({ error: err.message, code: err.code });
   }
 });
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-const distPath = path.join(__dirname, "dist");
+var distPath = path.join(__dirname, "dist");
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
-  app.get(/^(?!\/api).*$/, (_req, res) => {
+  app.get(/^(?!\/api).*$/, function(_req, res) {
     res.sendFile(path.join(distPath, "index.html"));
   });
 }
 
-app.listen(PORT, () => { console.log(`Servidor en http://localhost:${PORT}`); });
+app.listen(PORT, function() { console.log("Servidor en http://localhost:" + PORT); });
