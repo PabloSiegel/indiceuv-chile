@@ -35,36 +35,64 @@ function getCategoria(uv) {
   return "5";
 }
 
-async function getUVForRegion(region) {
-  const url = "https://api.open-meteo.com/v1/forecast" +
-    "?latitude=" + region.lat +
-    "&longitude=" + region.lng +
+// In-memory cache: one batch request per 2 hours instead of 16 per user visit
+let uvCache = null;
+let cacheTimestamp = 0;
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+async function fetchAllUVBatch() {
+  const now = Date.now();
+  if (uvCache && (now - cacheTimestamp) < CACHE_TTL_MS) {
+    console.log("Serving UV data from cache");
+    return uvCache;
+  }
+
+  // Single batch request for all 16 regions
+  const lats = REGIONES.map((r) => r.lat).join(",");
+  const lngs = REGIONES.map((r) => r.lng).join(",");
+  const url =
+    "https://api.open-meteo.com/v1/forecast" +
+    "?latitude=" + lats +
+    "&longitude=" + lngs +
     "&daily=uv_index_max" +
     "&timezone=America/Santiago" +
     "&forecast_days=2";
 
+  console.log("Fetching UV data from Open-Meteo (batch)...");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
+  const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error("HTTP " + res.status + " from Open-Meteo: " + text.slice(0, 200));
+      throw new Error("HTTP " + res.status + " from Open-Meteo: " + text.slice(0, 300));
     }
-    const data = await res.json();
-    if (!data.daily || !data.daily.uv_index_max) {
-      throw new Error("Respuesta inesperada de Open-Meteo: " + JSON.stringify(data).slice(0, 200));
+    const dataArray = await res.json();
+    if (!Array.isArray(dataArray) || dataArray.length !== REGIONES.length) {
+      throw new Error("Unexpected batch response: " + JSON.stringify(dataArray).slice(0, 200));
     }
-    const uvHoy = Math.round(data.daily.uv_index_max[0] || 0);
-    const uvManana = Math.round(data.daily.uv_index_max[1] || 0);
-    return {
-      id_region: region.id_region,
-      nombre_region: region.nombre_region,
-      max_diaria: uvHoy,
-      max_manana: uvManana,
-      categoria: getCategoria(uvHoy),
-    };
+
+    const results = REGIONES.map((region, i) => {
+      const d = dataArray[i];
+      if (!d.daily || !d.daily.uv_index_max) {
+        throw new Error("Missing UV data for region " + region.id_region);
+      }
+      const uvHoy = Math.round(d.daily.uv_index_max[0] || 0);
+      const uvManana = Math.round(d.daily.uv_index_max[1] || 0);
+      return {
+        id_region: region.id_region,
+        nombre_region: region.nombre_region,
+        max_diaria: uvHoy,
+        max_manana: uvManana,
+        categoria: getCategoria(uvHoy),
+      };
+    });
+
+    uvCache = results;
+    cacheTimestamp = now;
+    console.log("UV data cached successfully");
+    return results;
   } finally {
     clearTimeout(timer);
   }
@@ -72,16 +100,20 @@ async function getUVForRegion(region) {
 
 app.get("/api/uv", async (req, res) => {
   try {
+    const allData = await fetchAllUVBatch();
     const region = req.query.region || "0";
-    const regiones = region === "0"
-      ? REGIONES
-      : REGIONES.filter((r) => r.id_region === region);
-    if (regiones.length === 0) return res.status(404).json({ error: "Region not found" });
+    const results =
+      region === "0" ? allData : allData.filter((r) => r.id_region === region);
 
-    const results = await Promise.all(regiones.map(getUVForRegion));
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Region not found" });
+    }
 
     const today = new Date().toLocaleDateString("es-CL", {
-      weekday: "long", year: "numeric", month: "long", day: "numeric",
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
       timeZone: "America/Santiago",
     });
     res.json({ data: results, message: "Datos del " + today });
