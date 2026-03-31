@@ -145,13 +145,6 @@ function UVCard({ data, onBack, widget = false }) {
     </div>
   );
 
-// Fondo transparente en modo widget
-  useEffect(() => {
-    if (isWidget) {
-      document.body.style.background = "transparent";
-      document.documentElement.style.background = "transparent";
-    }
-  }, [isWidget]);
 
     // Modo widget: solo la tarjeta, sin chrome
   if (widget) return card;
@@ -245,6 +238,14 @@ export default function UVIndiceApp() {
   const activeRegion = regionId
     ? allRegions.find((r) => String(r.id_region) === String(regionId))
     : null;
+
+  // Fondo transparente en modo widget
+  useEffect(() => {
+    if (isWidget) {
+      document.body.style.background = "transparent";
+      document.documentElement.style.background = "transparent";
+    }
+  }, [isWidget]);
 
   // ── Modo widget: sin fondo, sin padding, solo la tarjeta ──
   if (isWidget) {
