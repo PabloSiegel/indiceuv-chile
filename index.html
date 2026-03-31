@@ -6,7 +6,13 @@
     <title>Indice UV Chile</title>
     <meta name="description" content="Indice de radiacion ultravioleta por region en Chile" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>body { background-color: #020617; margin: 0; }</style>
+    <style>body { margin: 0; }</style>
+    <script>
+      if (!window.location.hash.startsWith('#/widget/')) {
+        document.documentElement.style.backgroundColor = '#020617';
+        document.body && (document.body.style.backgroundColor = '#020617');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
