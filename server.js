@@ -35,9 +35,8 @@ function getCategoria(uv) {
   return "5";
 }
 
-// Valores de respaldo para cuando la API no está disponible (datos típicos de otoño)
+// Valores de respaldo para cuando la API no está disponible
 const FALLBACK_UV = [9,8,8,7,7,6,6,5,5,4,4,4,3,3,2,2];
-
 const fallbackData = REGIONES.map((r, i) => ({
   id_region: r.id_region,
   nombre_region: r.nombre_region,
@@ -46,21 +45,19 @@ const fallbackData = REGIONES.map((r, i) => ({
   categoria: getCategoria(FALLBACK_UV[i]),
 }));
 
-// Cache en memoria: guarda el último resultado exitoso
+// Cache en memoria: se actualiza cada 1 hora
 let uvCache = null;
 let cacheTimestamp = 0;
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
+const CACHE_TTL_MS = 1 * 60 * 60 * 1000; // 1 hora
 
 async function fetchAllUVBatch() {
   const now = Date.now();
 
-  // Si el caché es reciente, usarlo directamente
   if (uvCache && (now - cacheTimestamp) < CACHE_TTL_MS) {
     console.log("Sirviendo datos desde caché");
     return uvCache;
   }
 
-  // Intentar actualizar desde Open-Meteo
   const lats = REGIONES.map((r) => r.lat).join(",");
   const lngs = REGIONES.map((r) => r.lng).join(",");
   const url =
@@ -101,7 +98,6 @@ async function fetchAllUVBatch() {
       };
     });
 
-    // Actualizar caché con datos frescos
     uvCache = results;
     cacheTimestamp = now;
     console.log("Caché actualizado con datos frescos de Open-Meteo");
@@ -109,16 +105,12 @@ async function fetchAllUVBatch() {
 
   } catch (err) {
     clearTimeout(timer);
-
-    // Si hay caché aunque esté vencido, usarlo antes que fallar
     if (uvCache) {
       const ageMin = Math.round((now - cacheTimestamp) / 60000);
-      console.warn("API falló (" + err.message.slice(0, 80) + "). Usando caché de hace " + ageMin + " min.");
+      console.warn("API falló. Usando caché de hace " + ageMin + " min. Error: " + err.message.slice(0, 80));
       return uvCache;
     }
-
-    // Sin caché: usar datos de respaldo para no mostrar error
-    console.warn("API falló y no hay caché. Usando datos de respaldo. Error:", err.message.slice(0, 80));
+    console.warn("API falló y no hay caché. Usando datos de respaldo. Error: " + err.message.slice(0, 80));
     return fallbackData;
   } finally {
     clearTimeout(timer);
