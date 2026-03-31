@@ -7,7 +7,7 @@
  */
 import { useState, useEffect, useCallback } from "react";
 
-// ─── Configuración ───────────────────────────────────────────────────────────
+// ─── Configuración ──────────────────────────────────────────────────────────
 const PROXY_URL = "/api/uv";
 
 const CITY_MAP = {
@@ -17,7 +17,7 @@ const CITY_MAP = {
   "13": "Valdivia", "14": "Puerto Montt", "15": "Coyhaique", "16": "Punta Arenas",
 };
 
-// ─── Helpers UV ──────────────────────────────────────────────────────────────
+// ─── Helpers UV ─────────────────────────────────────────────────────────────
 function getUVInfo(uv, categoria) {
   const n = Number(uv);
   if (n <= 2 || categoria === "1") return { level: "Bajo", spf: "SPF 15", textColor: "text-green-400", accent: "from-green-400 to-green-500", pill: "bg-green-500/20 text-green-300 border-green-500/30", recommendation: "No se requiere protección especial. Disfruta el sol de forma segura.", reapply: "No necesario", hat: "Opcional" };
@@ -37,14 +37,20 @@ function useClock() {
   return time.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
 }
 
-// ─── Routing con hash ─────────────────────────────────────────────────────────
+// ─── Routing con hash ────────────────────────────────────────────────────────
 function useRoute() {
   const parse = () => {
-    const mWidget = window.location.hash.match(/^#\/widget\/(\d+)$/);
-    if (mWidget) return { regionId: mWidget[1], isWidget: true };
-    const mRegion = window.location.hash.match(/^#\/region\/(\d+)$/);
-    if (mRegion) return { regionId: mRegion[1], isWidget: false };
-    return { regionId: null, isWidget: false };
+    const hash = window.location.hash;
+    const [path, qs] = hash.split('?');
+    const params = new URLSearchParams(qs || '');
+    const mWidget = path.match(/^#\/widget\/(\d+)$/);
+    if (mWidget) {
+      const bg = params.get('bg');
+      return { regionId: mWidget[1], isWidget: true, panelBg: bg ? `#${bg}` : null };
+    }
+    const mRegion = path.match(/^#\/region\/(\d+)$/);
+    if (mRegion) return { regionId: mRegion[1], isWidget: false, panelBg: null };
+    return { regionId: null, isWidget: false, panelBg: null };
   };
   const [route, setRoute] = useState(parse);
   useEffect(() => {
@@ -55,7 +61,7 @@ function useRoute() {
   const navigate = useCallback((id) => {
     window.location.hash = id ? `#/region/${id}` : "";
   }, []);
-  return { regionId: route.regionId, isWidget: route.isWidget, navigate };
+  return { regionId: route.regionId, isWidget: route.isWidget, panelBg: route.panelBg, navigate };
 }
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
@@ -68,7 +74,7 @@ function Spinner() {
   );
 }
 
-// ─── Error ────────────────────────────────────────────────────────────────────
+// ─── Error ───────────────────────────────────────────────────────────────────
 function ErrorBox({ message, onRetry }) {
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center max-w-xs">
@@ -83,7 +89,7 @@ function ErrorBox({ message, onRetry }) {
 }
 
 // ─── Tarjeta UV ──────────────────────────────────────────────────────────────
-function UVCard({ data, onBack, widget = false }) {
+function UVCard({ data, onBack, widget = false, panelBg = null }) {
   const time = useClock();
   const uv = Number(data.max_diaria);
   const info = getUVInfo(uv, data.categoria);
@@ -110,7 +116,7 @@ function UVCard({ data, onBack, widget = false }) {
           </div>
         </div>
         {/* Panel derecho */}
-        <div className="p-4 bg-slate-950 text-white flex flex-col justify-between">
+        <div className="p-4 text-white flex flex-col justify-between" style={{ backgroundColor: panelBg || '#020617' }}>
           <div className="flex items-center justify-between">
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Protección</div>
@@ -145,8 +151,7 @@ function UVCard({ data, onBack, widget = false }) {
     </div>
   );
 
-
-    // Modo widget: solo la tarjeta, sin chrome
+  // Modo widget: solo la tarjeta, sin chrome
   if (widget) return card;
 
   // Modo normal: con botón volver y footer
@@ -165,7 +170,7 @@ function UVCard({ data, onBack, widget = false }) {
   );
 }
 
-// ─── Lista de regiones ────────────────────────────────────────────────────────
+// ─── Lista de regiones ───────────────────────────────────────────────────────
 function RegionList({ regions, onSelect, onRefresh, dateMessage }) {
   return (
     <div className="w-full max-w-md">
@@ -209,9 +214,9 @@ function RegionList({ regions, onSelect, onRefresh, dateMessage }) {
   );
 }
 
-// ─── App principal ────────────────────────────────────────────────────────────
+// ─── App principal ───────────────────────────────────────────────────────────
 export default function UVIndiceApp() {
-  const { regionId, isWidget, navigate } = useRoute();
+  const { regionId, isWidget, panelBg, navigate } = useRoute();
   const [allRegions, setAllRegions] = useState([]);
   const [dateMessage, setDateMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -251,7 +256,7 @@ export default function UVIndiceApp() {
   if (isWidget) {
     if (loading) return <div style={{ width: 446, height: 213, display: "flex", alignItems: "center", justifyContent: "center", background: "#0f172a", color: "#94a3b8", fontSize: 13, borderRadius: 16 }}>Cargando…</div>;
     if (!activeRegion) return <div style={{ width: 446, height: 213, display: "flex", alignItems: "center", justifyContent: "center", background: "#0f172a", color: "#f87171", fontSize: 13, borderRadius: 16 }}>Región no encontrada</div>;
-    return <UVCard data={activeRegion} widget />;
+    return <UVCard data={activeRegion} widget panelBg={panelBg} />;
   }
 
   // ── Modo normal ──
