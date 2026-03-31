@@ -145,7 +145,15 @@ function UVCard({ data, onBack, widget = false }) {
     </div>
   );
 
-  // Modo widget: solo la tarjeta, sin chrome
+// Fondo transparente en modo widget
+  useEffect(() => {
+    if (isWidget) {
+      document.body.style.background = "transparent";
+      document.documentElement.style.background = "transparent";
+    }
+  }, [isWidget]);
+
+    // Modo widget: solo la tarjeta, sin chrome
   if (widget) return card;
 
   // Modo normal: con botón volver y footer
